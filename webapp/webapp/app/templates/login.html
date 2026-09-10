@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Login</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="card">
+        <h1>SIGN IN</h1>
+        <div id="msg" class="msg"></div>
+        <form id="loginForm">
+            <label>Email</label>
+            <input type="email" id="email" required>
+            <label>Password</label>
+            <input type="password" id="password" required>
+            <button type="submit">Login</button>
+        </form>
+        <div class="links">
+            <a href="/forgot-password">Forgot password?</a>
+            <a href="/signup">Create account</a>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById("loginForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById("msg");
+            msg.textContent = "";
+            const res = await fetch("/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    email: document.getElementById("email").value,
+                    password: document.getElementById("password").value
+                })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                window.location.href = "/dashboard";
+            } else {
+                msg.className = "msg error";
+                msg.textContent = data.detail || "Login failed";
+            }
+        });
+    </script>
+</body>
+</html>

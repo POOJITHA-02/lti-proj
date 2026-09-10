@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="dashboard-wrap">
+        <div class="topbar">
+            <h1>SIGNATURE-DRIVEN INVENTORY</h1>
+            <button style="width:auto; padding:8px 16px;" onclick="logout()">Logout</button>
+        </div>
+
+        <div class="filters">
+            <div class="filter-group">
+                <label>Household Orientation</label>
+                <select id="f_household">
+                    <option value="all">All</option>
+                    <option value="solo">Solo</option>
+                    <option value="family">Family</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Shopping Mission</label>
+                <select id="f_mission">
+                    <option value="all">All</option>
+                    <option value="topup">Top-up</option>
+                    <option value="stockup">Stock-up</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Convenience</label>
+                <select id="f_convenience">
+                    <option value="all">All</option>
+                    <option value="ready_to_eat">Ready-to-eat</option>
+                    <option value="raw_ingredients">Raw ingredients</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Purchase Behavior</label>
+                <select id="f_purchase">
+                    <option value="all">All</option>
+                    <option value="routine">Routine</option>
+                    <option value="exploration">Exploration</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Basket Behavior</label>
+                <select id="f_basket">
+                    <option value="all">All</option>
+                    <option value="small">Small</option>
+                    <option value="large">Large</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-box" id="chart1"></div>
+            <div class="chart-box" id="chart2"></div>
+            <div class="chart-box" id="chart3"></div>
+            <div class="chart-box" id="chart4"></div>
+        </div>
+    </div>
+
+    <script>
+        async function logout() {
+            await fetch("/auth/logout", { method: "POST" });
+            window.location.href = "/login";
+        }
+
+        // Placeholder — will call a /api/dashboard-data endpoint with the
+        // 5 filter values once the clustering output table exists, and
+        // render Plotly charts into chart1..chart4.
+        function getFilters() {
+            return {
+                household: document.getElementById("f_household").value,
+                mission: document.getElementById("f_mission").value,
+                convenience: document.getElementById("f_convenience").value,
+                purchase: document.getElementById("f_purchase").value,
+                basket: document.getElementById("f_basket").value,
+            };
+        }
+
+        document.querySelectorAll(".filter-group select").forEach(el => {
+            el.addEventListener("change", () => console.log("filters:", getFilters()));
+        });
+    </script>
+</body>
+</html>

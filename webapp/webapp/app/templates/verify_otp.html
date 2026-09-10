@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Verify OTP</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="card">
+        <h1>VERIFY EMAIL</h1>
+        <div id="msg" class="msg"></div>
+        <form id="otpForm">
+            <label>Email</label>
+            <input type="email" id="email" required>
+            <label>6-digit OTP</label>
+            <input type="text" id="otp" maxlength="6" required>
+            <button type="submit">Verify</button>
+        </form>
+        <div class="links">
+            <a href="/login">Back to login</a>
+        </div>
+    </div>
+
+    <script>
+        const stored = sessionStorage.getItem("pending_email");
+        if (stored) document.getElementById("email").value = stored;
+
+        document.getElementById("otpForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById("msg");
+            const res = await fetch("/auth/verify-otp", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    email: document.getElementById("email").value,
+                    otp: document.getElementById("otp").value
+                })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                msg.className = "msg success";
+                msg.textContent = data.message + " Redirecting to login...";
+                setTimeout(() => window.location.href = "/login", 1200);
+            } else {
+                msg.className = "msg error";
+                msg.textContent = data.detail || "Verification failed";
+            }
+        });
+    </script>
+</body>
+</html>
