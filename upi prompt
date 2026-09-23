@@ -1,0 +1,202 @@
+PROJECT: UPI Bank Reliability Monitoring, Forecasting & Explanation Platform
+
+## Setup instruction (do this first)
+Before doing anything else, explore my local project folder named "upi" — 
+it contains multiple subfolders for different components of this project. 
+Read through the actual files (not just filenames) to understand exact 
+current state, function signatures, data schemas, and column names before 
+writing any new code, since this project has gone through many rounds of 
+real-data-driven bug fixes and the code is the source of truth, not this 
+summary.
+
+## Project aim
+A platform that monitors India's UPI payment system reliability at the 
+bank level, using real NPCI/RBI public data. It forecasts Technical 
+Decline (TD) and Business Decline (BD) rates per bank, detects when a 
+bank's reliability genuinely shifts (not just noise), and explains *why* 
+using retrieval-augmented generation grounded in real regulatory 
+documents plus domain knowledge — never just guessing.
+
+## What's already been built (working, tested against real data)
+
+**1. Data ingestion pipeline** (folder: `pipeline/`)
+- Ingests real NPCI "Top 50 Remitter Bank" monthly Excel files
+- Handles real discovered data issues: mixed percentage formats across 
+  years, filename-vs-actual-month mismatches, NPCI serving duplicate/stale 
+  data under a new month's filename (content-hash deduplication catches this)
+- Safely re-runnable, archives processed files
+- Outputs to a shared SQLite DB: `data/npci_upi.db`, table `upi_remitter_stats`
+
+**2. Analytics module** (folder: `npci_analytics/`)
+- `forecasting.py`: Prophet + naive-baseline comparison, backtested. 
+  Forecasts current month + next month by default; supports arbitrary 
+  future month queries with long-range warnings. Generalized to work on 
+  ANY metric via a `metric` parameter (not hardcoded).
+- `changepoint.py`: PELT + Binary Segmentation on real historical data 
+  ("confirmed" shifts) PLUS a z-score-based "emerging" shift detector 
+  comparing forecasts against recent baseline (since PELT structurally 
+  can't detect a shift in only 1-2 forecasted points). Both types land in 
+  one output table, distinguished by `is_provisional`.
+- `risk_scoring.py`: transparent `Impact Score = decline_rate × volume_share` 
+  (deliberately not ML — auditability matters more than sophistication 
+  here). 
+- **Metrics currently supported**: `td_pct`, `bd_pct`, `reversal_failure_pct` 
+  (derived: 100 - debit_reversal_success_pct), `total_debit_reversal_count_mn` 
+  (a raw count, handled differently — no percentage-style sanity ceiling, 
+  excluded from risk scoring since the Impact Score formula needs a rate).
+- `run_all_analytics.py`: orchestrates all metrics, all modules.
+- `view_changepoint_history.py`: CLI browser with WORSENED/IMPROVED/bank/metric filters.
+- **Real bugs found and fixed via testing, worth knowing**: 19 banks had 
+  fragmented histories due to inconsistent naming (e.g. "AIRTEL PAYMENTS 
+  BANK" vs "...LTD" vs "...LIMITED") — this was corrupting forecasts 
+  (one case: a real max-2.4% bank forecast at 42.5% due to a 5-month 
+  fragment instead of 29-month real history). Fixed via `normalize_bank_name()` 
+  in `data_loader.py`, plus a documented sanity clamp as a second safety 
+  layer. One remaining known edge case: a bank with a genuine institutional 
+  rebrand (5 name variants) not fully resolved — flagged, not silently hidden.
+
+**3. RAG explanation layer** (folder: `npci_rag/`)
+- Pulls real RBI RSS feeds (press releases, notifications) AND NPCI's own 
+  UPI-specific circulars (via a community-maintained Atom-format mirror, 
+  since NPCI operates UPI directly — more relevant than RBI's general feed)
+- Live Google News search as a third retrieval tier (bank+month-specific, 
+  catches actual incident reporting no government feed covers)
+- **Core design principle**: every explanation ALWAYS includes the 
+  quantitative shift + cross-bank pattern analysis (is this bank isolated 
+  or part of an industry-wide shift that month?) + seasonal context (FY-end 
+  March, festive Oct/Nov — real NPCI-documented load patterns) + domain 
+  knowledge (7 curated reference docs on TD/BD/reversal definitions and 
+  causes, sourced from real NPCI Circular OC-149 targets: TD<1%, BD<5%) — 
+  NEVER a dead-end "nothing found" message, even with zero document matches.
+- Fixed a real false-positive bug: TF-IDF scored two completely unrelated 
+  documents as "matching" on generic shared words — now requires the 
+  topic keyword to actually appear in a candidate document.
+- Fully metric-aware (correct units/labels per metric — a real bug existed 
+  where a count metric would've shown "%" — now fixed).
+- Two modes: free/local extractive (default), or LLM-polished if an API 
+  key is set (falls back to extractive on any failure).
+- Deliberately defaults to TF-IDF, not a downloaded semantic embedding 
+  model, since huggingface.co was unreachable in testing (same class of 
+  restriction as SMTP being blocked) — semantic upgrade is opt-in after 
+  testing reachability.
+
+**4. Basic web dashboard (existing, to be REPLACED, not extended — see below)**
+- Folder: `upi_dashboard/` — FastAPI + Jinja2, has working signup/login/OTP-
+  via-email/forgot-password auth (black/red gradient theme), and a basic 
+  dashboard page with a Power BI iframe placeholder + a placeholder RAG panel.
+- This existing UI is functional but basic and NOT wired to the real 
+  analytics/RAG outputs yet, and does not have the interactive multi-filter 
+  explorer, 3D elements, or role-based access described below.
+
+## What's in progress / not yet finished
+
+**A. Synthetic cause-category breakdown dataset** 
+File exists at `npci_analytics/analytics/cause_breakdown_synthetic.py` but 
+is UNTESTED — needs verification before trusting it. Context: user wants 
+to know WHY TD/BD happens (server error vs overload vs remitter's network 
+issue for TD; and similarly for BD), split into bank-side vs user-side 
+categories. Research confirmed: no real public dataset provides this 
+granularity — NPCI/RBI never publish per-bank cause-level breakdowns. What 
+IS real: NPCI's official "UPI Error and Response Codes" specification, 
+which classifies every response code as TD or BD with a specific reason — 
+used as the category taxonomy. The user explicitly approved building this 
+as SYNTHETIC data (clearly labeled throughout, real categories/fabricated 
+proportions) since no real numeric source exists. Structure: 
+`td_bank_side_pct` + `td_network_side_pct` = real `td_pct`; 
+`bd_user_side_pct` + `bd_bank_side_pct` = real `bd_pct`; plus finer sub-
+cause columns under each. NEEDS: testing against real data, verification 
+the splits sum correctly, integration into the forecasting/changepoint 
+modules (should work immediately since those are already generalized via 
+the `metric` parameter — just needs confirming).
+
+**B. RAG recommended actions / roadmap** — NOT YET BUILT.
+User wants every change-point explanation to include a recommended action, 
+differentiated by category:
+- User-side issues (e.g. BD from insufficient balance): what's the 
+  roadmap if a debit happens but reversal/rollback doesn't occur?
+- Bank-side issues (TD from server error, BD from account-freeze/KYC): 
+  what should the bank's ops team do to resolve it?
+Real regulatory grounding already researched and confirmed (use this, 
+don't re-derive): **RBI Circular DPSS.CO.PD No.629/02.01.014/2019-20** 
+(Harmonisation of TAT and Customer Compensation) — for UPI, if a customer's 
+account is debited but the beneficiary isn't credited, auto-reversal must 
+happen by T+1 working day; if it doesn't, the bank owes ₹100/day 
+compensation automatically (no customer complaint needed); NPCI's UDIR 
+(Unified Dispute and Issue Resolution) framework handles this at the NPCI 
+level; further escalation path is the RBI Banking Ombudsman. Build a 
+`rag/recommendations.py` module using this real framework for user-side 
+roadmaps, plus sensible bank-side ops recommendations (infra capacity 
+review, KYC process review, etc.) for bank-side categories. Wire into 
+`explain.py` so every explanation gets a "Recommended Action" section 
+based on which sub-category dominates that change-point.
+
+**C. Forecast sub-categories** — not yet wired, but should be close to 
+"just works" given the existing `metric` parameter generalization — needs 
+confirming end-to-end once (A) is tested.
+
+## Final desired output
+An integrated platform where, per bank per month: forecasted TD/BD (both 
+overall AND broken into sub-categories) + confirmed/emerging change-point 
+detection + a RAG-grounded explanation (real document citation where 
+available, always-present domain knowledge + cross-bank/seasonal analysis, 
+now ALSO a recommended action/roadmap) are all connected and viewable 
+through a new interactive UI.
+
+## New UI — build from scratch, do not extend the existing upi_dashboard
+Requirements as given by the user (some need your judgment on 
+implementation, flagged below):
+- Separate views for "user side" and "banker side" issues/attributes 
+  (distinct from each other, not one merged view)
+- A 3D interface with "moving objects" — **this needs a scoping 
+  conversation with the user before building**, since it's ambiguous 
+  whether they want a literal animated 3D visualization (e.g. Three.js 
+  network/flow diagram of transactions/declines moving through the 
+  system) or a more general "visually rich, modern" dashboard aesthetic 
+  loosely described as "3D." Ask before committing significant build 
+  effort here.
+- Power BI Desktop dashboard integration (embed, as in the existing 
+  dashboard's design, but rebuilt)
+- User authentication AND role-based access control — at minimum: a 
+  "Bank/Ops" role (sees bank-side issues + bank recommended actions) and 
+  a "User/Customer-support" role (sees user-side issues + customer 
+  roadmap), likely also an Admin role with full access. Reuse the proven 
+  auth logic/patterns from the existing `upi_dashboard/app/auth.py` 
+  (password hashing via pbkdf2_sha256 — NOT bcrypt, a real version-
+  compatibility bug was hit and fixed earlier — JWT sessions, OTP via 
+  SMTP) as a reference for what already works, but rebuild the actual UI/
+  frontend fresh rather than extending the old templates.
+
+## Practical constraints learned the hard way this project (respect these)
+- User is on a **company/office laptop** — expect corporate proxy issues 
+  blocking some domains (SMTP required an app password + occasionally 
+  blocked; huggingface.co was unreachable). Always build with graceful 
+  fallbacks and clear diagnostic output when a network call might fail, 
+  never let one blocked domain crash a whole pipeline.
+- **Task Scheduler is not usable** — any "automate this" solution needs a 
+  manual-run option, a simple Python loop option, and/or a GitHub Actions 
+  option instead.
+- User has **Docker installed** but no Node.js requirement has come up yet — 
+  a Three.js-based 3D UI can run as a single self-contained HTML file with 
+  a CDN script tag, no Node/build-step needed, consistent with how this 
+  project has avoided unnecessary tooling so far.
+- Test everything against real data before presenting it as working — 
+  this project's history is full of real bugs caught specifically by 
+  testing against actual data rather than trusting code review alone (bank 
+  name fragmentation, a pandas nullable-int crash, an XML encoding/proxy-
+  block issue, a false-positive RAG match, wrong units on a count metric). 
+  Assume the same discipline is expected going forward.
+- Keep everything Python-first and dependency-light where possible; this 
+  project has consistently preferred simpler/local solutions (TF-IDF over 
+  downloaded embeddings, SQLite over a heavier DB) given the office-laptop 
+  environment.
+
+## Immediate next steps, in order
+1. Explore the "upi" folder fully to confirm current file states match this summary.
+2. Test `cause_breakdown_synthetic.py` against real data, verify splits sum correctly.
+3. Build `rag/recommendations.py` and wire it into `explain.py`.
+4. Confirm forecasting/changepoint modules work on the new sub-category 
+   metric columns end-to-end.
+5. Ask the user to clarify the "3D moving objects" requirement before 
+   building the new UI.
+6. Design and build the new UI from scratch: separate user/banker views, 
+   RBAC, Power BI embed, once (5) is resolved.
