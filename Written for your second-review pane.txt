@@ -1,0 +1,205 @@
+Written for: your second-review panel (slide text to paste in). Numbers are from your current data and results.
+
+---
+
+### Slide 1 — Introduction
+**Signature-Driven Inventory: stocking for the shopper who is actually in the aisle**
+- Stores usually order stock from the average of recent weeks' sales.
+- Averages hide **who** is buying and react **late** to sudden changes in demand, so shelves run empty or excess stock piles up.
+- This project learns shopper behaviour from real baskets, spots demand spikes early, and forecasts how much of each product to stock.
+- Dataset: Instacart Market Basket (real, anonymised grocery orders):
+  - **3.3 million orders, 33.8 million order lines**
+  - **206,213 shoppers**
+  - **49,688 products, 21 departments, 134 aisles**
+
+### Slide 2 — Objectives
+- Profile every shopper and basket on five behaviours: single or family, top-up or stock-up, ready-to-eat or cooking ingredients, routine or exploring, small or large basket.
+- Discover shopper groups automatically with deep clustering, and compare the models.
+- Detect demand peaks from each product's own sales history, without a festival calendar.
+- Prove the value: compare against traditional stocking on real orders.
+- Deliver it as a live, deployable web app with plain-language, AI-written summaries checked against the numbers.
+
+### Slide 3 — Modules
+1. **Data engineering:** loading, cleaning, live order stream
+2. **Feature engineering:** product tagging and basket behaviour rules
+3. **Pattern discovery:** deep clustering into shopper groups
+4. **Demand peaks and product relationships:** peak detection and a co-purchase graph
+5. **Value proof:** inventory backtest against traditional stocking
+6. **Web app and deployment:** dashboard, timeline, AI insights, Docker
+
+### Slide 4 — Methodology / model planning
+- **Pipeline:** raw orders → weekly timelines → behaviour labels → shopper groups → demand peaks → forecast → stock decision
+- **Behaviour labels:**
+  - Transparent rules, with each indicator casting a weighted vote.
+  - Every label carries a confidence and the evidence behind it.
+- **Shopper groups:**
+  - Seven models trained on the same inputs.
+  - The best is chosen by its average rank across quality metrics.
+- **Peak detection:**
+  - Each product's share of weekly sales is compared with the median of its previous 8 weeks.
+  - A week counts as unusual when z ≥ 3 and the rise is at least 25%.
+  - Peaks are typed as one-off, lasting or repeating, and as affecting one product, a category or the whole store.
+- **Value test (walk-forward backtest):**
+  - Each week, each method sees only the past.
+  - Both methods use the same ordering rule and the same weekly self-tuning.
+  - They are compared at the same 97% of orders filled.
+
+### Slide 5 — Data preprocessing & EDA
+**Preprocessing**
+- Loaded the Kaggle CSVs into SQLite and indexed them for fast queries.
+- The data has no calendar dates, so dates were reconstructed from each shopper's gaps between orders.
+- Aggregated to weekly totals for every product, aisle and department, excluding partial and low-volume weeks.
+- Kept 5,237 products with enough sales to track weekly.
+- Tagged all 49,688 products by rules plus an AI model.
+- Fields the data doesn't have (quantity per item, prices, pack size) are marked "not available" and never estimated.
+
+**EDA findings**
+- Fresh produce is about 30% of all items; dairy and eggs about 17%.
+- An average basket holds about 10 items.
+- Total orders swing by more than 25% within weeks.
+- 489 demand peaks in one year.
+- 6 shopper groups. The largest (81% of shoppers) is everyday families. The niche groups buy far more of one department than the average shopper: pet supplies 31×, alcohol 23×, baby products 16×.
+
+### Slide 6 — Approach / algorithms / tools
+**Algorithms**
+- Rule-based weighted voting (basket behaviour)
+- Deep clustering: GCN (selected), DGCformer, DEC, IDEC, contrastive clustering, transformer, with k-means as the baseline
+- Clustering metrics: silhouette, Davies–Bouldin, Calinski–Harabasz, stability across runs (ARI)
+- Live group assignment: k-nearest neighbours, agreeing with the batch model for 98% of held-out shoppers
+- Robust anomaly detection: median baseline with z-scores
+- Forecasting and stocking: moving average and exponential smoothing as the traditional baselines, against the shopper-signature forecast; order-up-to policy with a safety margin
+
+**Tools**
+- Python: pandas, NumPy, SciPy, scikit-learn, PyTorch, UMAP
+- Storage and app: SQLite, FastAPI, Chart.js
+- AI summaries: LLM via Groq / Gemini, with automatic fact-checking
+- Deployment: Docker, GitHub Actions, Caddy (HTTPS)
+- Reporting: Power BI
+
+### Slide 7 — Project plan / milestones (progress)
+
+| Phase | Milestone | Status |
+|---|---|---|
+| 1 | Data loading, cleaning, live order stream | ✅ Done |
+| 2 | Product tagging and basket behaviour rules | ✅ Done |
+| 3 | Deep clustering and model comparison | ✅ Done |
+| 4 | Demand peak detection and product graph | ✅ Done |
+| 5 | Backtest against traditional stocking | ✅ Done |
+| 6 | Web app (dashboard, timeline, AI insights) | ✅ Done |
+| 7 | Docker images + CI/CD pipeline | ✅ Done |
+| 8 | Cloud go-live (VM + HTTPS) | 🔄 In progress |
+| 9 | Final validation, report, demo | ⏳ Next |
+
+**Key result so far:**
+- For the same 97% of orders filled, it needed **10% less stock**.
+- With the same safety margin, it **missed 31% fewer sales**.
+- It was **more accurate during demand spikes** (forecast off by 18% instead of 20%).
+
+Written for: you, plus a ready-to-paste prompt for Gemini.
+
+## Pipeline structure (matches the real run order in the repo)
+
+| # | Stage | Script | Input → output | Key result |
+|---|---|---|---|---|
+| 1 | **Load reference data** | `load_reference_data.py` | Kaggle CSVs (products, aisles, departments) → SQLite | 49,688 products, 134 aisles, 21 departments |
+| 2 | **Load orders + rebuild dates** | `stream_simulator.py` (bulk) | orders + order lines → `live_orders`, `live_order_items` | 3.3M orders, 33.8M lines; dates rebuilt from each shopper's gaps between orders |
+| 3 | **Product tagging** | `retag_products.py` | product names → `product_tags` | rules + AI model: family/single use, ready-to-eat/raw, staple |
+| 4 | **Basket behaviour features** | `behavior_features.py` | orders + tags → `basket_profiles`, weekly timelines | 5 labels per basket with evidence; weekly sales per product, aisle and department |
+| 5 | **Product relationship graph** | `product_graph.py` | baskets → `product_graph_edges` | bought-together pairs (lift) + GCN product embeddings |
+| 6 | **Demand peak detection** | `peak_detection.py` | weekly timelines → `demand_peaks` | 489 peaks/year, typed one-off / lasting / repeating |
+| 7 | **Shopper clustering** | `pattern_discovery.py` | shopper features + embeddings → `shopper_signatures`, `model_comparison`, saved model | 7 models compared → GCN selected → 6 shopper groups |
+| 8 | **Value proof (backtest)** | `inventory_backtest.py` | weekly demand → `inventory_backtest_results` | 10% less stock at 97% fill vs traditional |
+| 9 | **Live processing** | `live_order_generator.py` → `live_processing.py` | each new order → updated shopper profile + group | live assignment agrees with the batch model for 98% of held-out shoppers |
+| 10 | **Web app + AI summaries** | `webapp/` (FastAPI) | the database → 7 pages | plain-language, fact-checked summaries |
+| 11 | **Deployment** | Dockerfile, GitHub Actions | push → images → VM | HTTPS live site, auto-update on every push |
+
+**Storage:** one SQLite database (`instacart.db`), read-only from the web app.
+
+**Three layers for the diagram:** data (1–3) → analytics/ML (4–8) → serving (9–11).
+
+## Prompt to paste into Gemini
+
+```
+Create one presentation slide titled "System Pipeline" showing a left-to-right
+data pipeline for a project called "Signature-Driven Inventory" (shopper-behaviour-
+based stock planning on the Instacart grocery dataset). Dark background (#0b0f17),
+white text, amber accent (#ffcc3d). Use rounded boxes connected by arrows, grouped
+into three labelled swim-lanes (columns):
+
+LANE 1 – DATA LAYER (blue #3987e5)
+  1. Raw data: Instacart CSVs (3.3M orders, 33.8M order lines, 49,688 products)
+  2. Data loading & cleaning -> SQLite database; dates rebuilt from order gaps
+  3. Product tagging: rules + AI model (family/single, ready-to-eat/raw, staple)
+
+LANE 2 – ANALYTICS & ML LAYER (orange #d95926)
+  4. Basket behaviour features: 5 labels per basket with evidence
+     (single/family, top-up/stock-up, ready-to-eat/cooking, routine/explore, small/large)
+  5. Product relationship graph: bought-together pairs + GCN embeddings
+  6. Demand peak detection: weekly baseline + z-score -> 489 peaks/year
+  7. Deep clustering: 7 models compared (GCN, DGCformer, DEC, IDEC,
+     contrastive, transformer, k-means) -> GCN selected -> 6 shopper groups
+  8. Backtest vs traditional stocking -> 10% less stock at 97% orders filled
+
+LANE 3 – SERVING LAYER (green #199e70)
+  9. Live order processing: each new order updates its shopper's group (KNN)
+  10. Web app (FastAPI + Chart.js): Overview, Why choose this, Demand over time,
+      Shopper groups, Compare, Trends, Shopper lookup
+  11. AI summaries (LLM) checked against the numbers
+  12. Deployment: Docker + GitHub Actions -> cloud VM with HTTPS
+
+Arrows: 1->2->3->4; 4->5, 4->6, 4->7; 5->7; 6->8; 7->8; 7->9; 8->10; 9->10; 10->11; 10->12.
+Put a small database cylinder labelled "SQLite (instacart.db)" under lane 1,
+with dotted lines to lanes 2 and 3.
+Bottom banner, in amber: "Result: same full shelves with 10% less stock;
+31% fewer missed sales at the same safety margin."
+Keep text short inside boxes (max 2 lines each), font sans-serif,
+16:9 layout, no clip-art.
+```
+
+**Tips if Gemini's first result is crowded:**
+- Ask it to "split this into two slides: Data + ML on slide 1, Serving + Deployment on slide 2", or
+- ask it to "keep only the stage names in the boxes and move the numbers into speaker notes".
+
+
+Here's a prompt to paste into Gemini. It describes your project's actual pipeline and matches the deck's navy, saffron and green colours.
+
+```
+Create a clean, professional system-architecture diagram in flat vector style, 16:9 landscape, white background, for a college project presentation. Use navy blue (#0B1F4D) for main boxes, saffron orange (#F28C28) for the customer-side flow, royal blue (#1F5FC9) for the bank analytics flow, and green (#1F9D55) for verification. Rounded rectangles, thin arrows, simple flat icons, generous spacing, all text in a clear sans-serif font, horizontal, and spelled exactly as given.
+
+Title at the top: "UPI Reliability, Automated Recovery & Early-Warning System – Pipeline"
+
+Lay out four horizontal layers from top to bottom, each with a small label on the left:
+
+LAYER 1 – "DATA" (navy):
+[NPCI Monthly Bank Data (Excel, 2020–2026)] → [Cleaning & Normalisation] → [SQLite Database] → [Bank-Month Panel: TD, BD, Volume, Reversal]
+
+LAYER 2 – "ANALYTICS & RAG" (royal blue), fed by the Bank-Month Panel:
+[Change-Point Detection (PELT)]   [Forecasting (Prophet)]   [Risk Score (Rate × Volume)]   [RAG Explanations (RBI/NPCI docs)]
+
+LAYER 3 – "CUSTOMER RECOVERY" (saffron), left to right:
+[Customer Transactions] → [Failure Detection: Failed + Money Taken?] → [Automatic Refund Request] → [Bank Recovery Desk] → [Refund & Customer Update]
+Small note under "Automatic Refund Request": "RBI deadline T+1 / T+5"
+
+LAYER 4 – "BANK INTELLIGENCE" (green), left to right:
+[Customer Impact of Change] → [Early Warning] → [Record a Fix] → [Did the Fix Work?] → [Recurrence Monitoring]
+
+Connections:
+- An arrow from Layer 2 down to Layer 4 labelled "insights".
+- A dashed arrow from "Bank-Month Panel" to "Customer Transactions" labelled "bank-consistent simulation".
+- A curved feedback arrow from "Recurrence Monitoring" back up to "Change-Point Detection", labelled "continuous monitoring".
+- A dashed arrow from "RAG Explanations" to "Failure Detection" labelled "plain-language guide".
+
+On the far right, a narrow vertical panel titled "USERS" with two icons: a phone icon labelled "Customer App" and a laptop icon labelled "Bank Admin Desk".
+
+At the bottom, a thin strip titled "DEPLOYMENT" with small logo-free icons in a row: "Docker" → "GitHub Actions" → "Render" → "Netlify".
+
+No 3D effects, no shadows, no stock photos, no extra text beyond the labels above.
+```
+
+**If Gemini garbles the text** (image models often misspell long labels), try this shorter version instead:
+
+```
+Flat vector architecture diagram, 16:9, white background, navy, orange, blue and green colour scheme. Four horizontal rows of rounded boxes connected by arrows: Row 1 "Data": NPCI Data → Cleaning → Database. Row 2 "Analytics": Change-Points, Forecasting, Risk Score, RAG. Row 3 "Recovery": Transactions → Failure Detection → Refund Request → Bank Desk → Refund. Row 4 "Intelligence": Impact → Early Warning → Fix → Verify → Recurrence. A curved arrow loops from Recurrence back to Change-Points. Minimal text, clean sans-serif font, no shadows, no 3D.
+```
+
+If the text still comes out wrong, ask for the diagram with "empty boxes, no text" and type the labels yourself in PowerPoint, which gives the cleanest result.
